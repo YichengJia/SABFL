@@ -93,6 +93,7 @@ def _build_best_seed_rows(
     raw_rows: List[Dict[str, Any]],
     n_clients: int,
     mode: str,
+    compression_suite: str,
 ) -> Dict[str, Dict[int, Dict[str, Any]]]:
     """
     For each protocol_family and seed, pick the profile with best balanced score.
@@ -104,6 +105,7 @@ def _build_best_seed_rows(
             r for r in raw_rows
             if r["num_clients"] == n_clients
             and r["fairness_mode"] == mode
+            and str(r.get("compression_suite", "mixed")) == str(compression_suite)
             and r["protocol_family"] == proto
         ]
         if not rows:
@@ -121,9 +123,14 @@ def _apply_holm_correction(rows: List[Dict[str, Any]]) -> None:
     """
     In-place Holm correction by (num_clients, fairness_mode, metric) family.
     """
-    grouped: Dict[Tuple[int, str, str], List[Dict[str, Any]]] = {}
+    grouped: Dict[Tuple[int, str, str, str], List[Dict[str, Any]]] = {}
     for r in rows:
-        key = (int(r["num_clients"]), str(r["fairness_mode"]), str(r["metric"]))
+        key = (
+            int(r["num_clients"]),
+            str(r["fairness_mode"]),
+            str(r.get("compression_suite", "mixed")),
+            str(r["metric"]),
+        )
         grouped.setdefault(key, []).append(r)
 
     for _, group in grouped.items():
@@ -142,6 +149,7 @@ def _build_pairwise_rows(
     raw_rows: List[Dict[str, Any]],
     n_list: List[int],
     fairness_modes: List[str],
+    compression_suites: List[str],
 ) -> List[Dict[str, Any]]:
     """
     Paired seed-wise tests: improved_async (best profile per seed) vs each baseline family.
@@ -158,64 +166,72 @@ def _build_pairwise_rows(
 
     for n_clients in n_list:
         for mode in fairness_modes:
-            best = _build_best_seed_rows(raw_rows, n_clients=n_clients, mode=mode)
-            if "improved_async" not in best:
-                continue
-            imp = best["improved_async"]
-            for base_proto in baselines:
-                if base_proto not in best:
+            for compression_suite in compression_suites:
+                best = _build_best_seed_rows(
+                    raw_rows,
+                    n_clients=n_clients,
+                    mode=mode,
+                    compression_suite=compression_suite,
+                )
+                if "improved_async" not in best:
                     continue
-                base = best[base_proto]
-                shared_seeds = sorted(set(imp.keys()) & set(base.keys()))
-                if not shared_seeds:
-                    continue
+                imp = best["improved_async"]
+                for base_proto in baselines:
+                    if base_proto not in best:
+                        continue
+                    base = best[base_proto]
+                    shared_seeds = sorted(set(imp.keys()) & set(base.keys()))
+                    if not shared_seeds:
+                        continue
 
-                for metric_name, diff_fn in metric_specs:
-                    diffs = []
-                    imp_vals = []
-                    base_vals = []
-                    for s in shared_seeds:
-                        iv = float(imp[s][metric_name])
-                        bv = float(base[s][metric_name])
-                        imp_vals.append(iv)
-                        base_vals.append(bv)
-                        diffs.append(diff_fn(iv, bv))
+                    for metric_name, diff_fn in metric_specs:
+                        diffs = []
+                        imp_vals = []
+                        base_vals = []
+                        for s in shared_seeds:
+                            iv = float(imp[s][metric_name])
+                            bv = float(base[s][metric_name])
+                            imp_vals.append(iv)
+                            base_vals.append(bv)
+                            diffs.append(diff_fn(iv, bv))
 
-                    d_arr = np.array(diffs, dtype=np.float64)
-                    mean_diff, std_diff, ci95 = _mean_std_ci(diffs)
-                    wins = int(np.sum(d_arr > 1e-12))
-                    losses = int(np.sum(d_arr < -1e-12))
-                    ties = int(len(d_arr) - wins - losses)
-                    p_sign = _sign_test_pvalue_two_sided(wins=wins, losses=losses)
-                    dz = float(mean_diff / (std_diff + 1e-12))
+                        d_arr = np.array(diffs, dtype=np.float64)
+                        mean_diff, std_diff, ci95 = _mean_std_ci(diffs)
+                        wins = int(np.sum(d_arr > 1e-12))
+                        losses = int(np.sum(d_arr < -1e-12))
+                        ties = int(len(d_arr) - wins - losses)
+                        p_sign = _sign_test_pvalue_two_sided(wins=wins, losses=losses)
+                        dz = float(mean_diff / (std_diff + 1e-12))
 
-                    imp_mu, _, _ = _mean_std_ci(imp_vals)
-                    base_mu, _, _ = _mean_std_ci(base_vals)
-                    rows.append({
-                        "num_clients": int(n_clients),
-                        "fairness_mode": mode,
-                        "metric": metric_name,
-                        "improved_proto": "improved_async(best-profile-per-seed)",
-                        "baseline_proto": base_proto,
-                        "paired_seeds": int(len(shared_seeds)),
-                        "improved_mean": float(imp_mu),
-                        "baseline_mean": float(base_mu),
-                        "diff_mean_positive_is_better_for_improved": float(mean_diff),
-                        "diff_std": float(std_diff),
-                        "diff_ci95": float(ci95),
-                        "cohen_dz": float(dz),
-                        "wins": wins,
-                        "losses": losses,
-                        "ties": ties,
-                        "p_value_sign": float(p_sign),
-                        "p_value_holm": None,
-                    })
+                        imp_mu, _, _ = _mean_std_ci(imp_vals)
+                        base_mu, _, _ = _mean_std_ci(base_vals)
+                        rows.append({
+                            "num_clients": int(n_clients),
+                            "fairness_mode": mode,
+                            "compression_suite": str(compression_suite),
+                            "metric": metric_name,
+                            "improved_proto": "improved_async(best-profile-per-seed)",
+                            "baseline_proto": base_proto,
+                            "paired_seeds": int(len(shared_seeds)),
+                            "improved_mean": float(imp_mu),
+                            "baseline_mean": float(base_mu),
+                            "diff_mean_positive_is_better_for_improved": float(mean_diff),
+                            "diff_std": float(std_diff),
+                            "diff_ci95": float(ci95),
+                            "cohen_dz": float(dz),
+                            "wins": wins,
+                            "losses": losses,
+                            "ties": ties,
+                            "p_value_sign": float(p_sign),
+                            "p_value_holm": None,
+                        })
 
     _apply_holm_correction(rows)
     rows.sort(
         key=lambda x: (
             int(x["num_clients"]),
             str(x["fairness_mode"]),
+            str(x.get("compression_suite", "mixed")),
             str(x["metric"]),
             float(x["p_value_holm"]) if x["p_value_holm"] is not None else 1.0,
         )
@@ -227,64 +243,73 @@ def _build_summary_rows(
     raw_rows: List[Dict[str, Any]],
     n_list: List[int],
     fairness_modes: List[str],
+    compression_suites: List[str],
 ) -> List[Dict[str, Any]]:
     """Aggregate by (n, mode, protocol_family): mean and best over profiles, then mean over seeds."""
-    summary: Dict[Tuple[int, str, str], Dict[str, Any]] = {}
+    summary: Dict[Tuple[int, str, str, str], Dict[str, Any]] = {}
     for n_clients in n_list:
         for mode in fairness_modes:
-            for proto in ("fedavg", "fedasync", "fedbuff", "scaffold", "improved_async"):
-                vals = [
-                    r for r in raw_rows
-                    if r["num_clients"] == n_clients
-                    and r["fairness_mode"] == mode
-                    and r["protocol_family"] == proto
-                ]
-                if not vals:
-                    continue
-                acc_mean, acc_std, acc_ci95 = _mean_std_ci([float(r["accuracy"]) for r in vals])
-                bal_mean, bal_std, bal_ci95 = _mean_std_ci([float(r["score_balanced"]) for r in vals])
-                comm_mean, comm_std, comm_ci95 = _mean_std_ci([float(r["communication_mb"]) for r in vals])
+            for compression_suite in compression_suites:
+                for proto in ("fedavg", "fedasync", "fedbuff", "scaffold", "improved_async"):
+                    vals = [
+                        r for r in raw_rows
+                        if r["num_clients"] == n_clients
+                        and r["fairness_mode"] == mode
+                        and str(r.get("compression_suite", "mixed")) == str(compression_suite)
+                        and r["protocol_family"] == proto
+                    ]
+                    if not vals:
+                        continue
+                    acc_mean, acc_std, acc_ci95 = _mean_std_ci([float(r["accuracy"]) for r in vals])
+                    bal_mean, bal_std, bal_ci95 = _mean_std_ci([float(r["score_balanced"]) for r in vals])
+                    comm_mean, comm_std, comm_ci95 = _mean_std_ci([float(r["communication_mb"]) for r in vals])
 
-                seed_vals = {}
-                for r in vals:
-                    seed_vals.setdefault(r["seed"], []).append(r)
-                best_seed_acc = []
-                best_seed_bal = []
-                for _, rs in seed_vals.items():
-                    best = max(rs, key=lambda x: x["score_balanced"])
-                    best_seed_acc.append(float(best["accuracy"]))
-                    best_seed_bal.append(float(best["score_balanced"]))
-                best_acc_mu, best_acc_std, best_acc_ci95 = _mean_std_ci(best_seed_acc)
-                best_bal_mu, best_bal_std, best_bal_ci95 = _mean_std_ci(best_seed_bal)
+                    seed_vals = {}
+                    for r in vals:
+                        seed_vals.setdefault(r["seed"], []).append(r)
+                    best_seed_acc = []
+                    best_seed_bal = []
+                    for _, rs in seed_vals.items():
+                        best = max(rs, key=lambda x: x["score_balanced"])
+                        best_seed_acc.append(float(best["accuracy"]))
+                        best_seed_bal.append(float(best["score_balanced"]))
+                    best_acc_mu, best_acc_std, best_acc_ci95 = _mean_std_ci(best_seed_acc)
+                    best_bal_mu, best_bal_std, best_bal_ci95 = _mean_std_ci(best_seed_bal)
 
-                first_seed = next(iter(seed_vals.keys()))
-                profile_count = len([r for r in vals if r["seed"] == first_seed])
-                summary[(n_clients, mode, proto)] = {
-                    "num_clients": n_clients,
-                    "fairness_mode": mode,
-                    "protocol_family": proto,
-                    "mean_over_profiles_accuracy": acc_mean,
-                    "mean_over_profiles_accuracy_std": acc_std,
-                    "mean_over_profiles_accuracy_ci95": acc_ci95,
-                    "mean_over_profiles_balanced_score": bal_mean,
-                    "mean_over_profiles_balanced_score_std": bal_std,
-                    "mean_over_profiles_balanced_score_ci95": bal_ci95,
-                    "mean_over_profiles_comm_mb": comm_mean,
-                    "mean_over_profiles_comm_mb_std": comm_std,
-                    "mean_over_profiles_comm_mb_ci95": comm_ci95,
-                    "best_over_profiles_accuracy": best_acc_mu,
-                    "best_over_profiles_accuracy_std": best_acc_std,
-                    "best_over_profiles_accuracy_ci95": best_acc_ci95,
-                    "best_over_profiles_balanced_score": best_bal_mu,
-                    "best_over_profiles_balanced_score_std": best_bal_std,
-                    "best_over_profiles_balanced_score_ci95": best_bal_ci95,
-                    "seeds": int(len(seed_vals)),
-                    "profiles": int(profile_count),
-                }
+                    first_seed = next(iter(seed_vals.keys()))
+                    profile_count = len([r for r in vals if r["seed"] == first_seed])
+                    summary[(n_clients, mode, compression_suite, proto)] = {
+                        "num_clients": n_clients,
+                        "fairness_mode": mode,
+                        "compression_suite": str(compression_suite),
+                        "protocol_family": proto,
+                        "mean_over_profiles_accuracy": acc_mean,
+                        "mean_over_profiles_accuracy_std": acc_std,
+                        "mean_over_profiles_accuracy_ci95": acc_ci95,
+                        "mean_over_profiles_balanced_score": bal_mean,
+                        "mean_over_profiles_balanced_score_std": bal_std,
+                        "mean_over_profiles_balanced_score_ci95": bal_ci95,
+                        "mean_over_profiles_comm_mb": comm_mean,
+                        "mean_over_profiles_comm_mb_std": comm_std,
+                        "mean_over_profiles_comm_mb_ci95": comm_ci95,
+                        "best_over_profiles_accuracy": best_acc_mu,
+                        "best_over_profiles_accuracy_std": best_acc_std,
+                        "best_over_profiles_accuracy_ci95": best_acc_ci95,
+                        "best_over_profiles_balanced_score": best_bal_mu,
+                        "best_over_profiles_balanced_score_std": best_bal_std,
+                        "best_over_profiles_balanced_score_ci95": best_bal_ci95,
+                        "seeds": int(len(seed_vals)),
+                        "profiles": int(profile_count),
+                    }
 
     summary_rows = list(summary.values())
     summary_rows.sort(
-        key=lambda x: (x["num_clients"], x["fairness_mode"], -x["best_over_profiles_balanced_score"])
+        key=lambda x: (
+            x["num_clients"],
+            x["fairness_mode"],
+            str(x.get("compression_suite", "mixed")),
+            -x["best_over_profiles_balanced_score"],
+        )
     )
     return summary_rows
 
@@ -293,11 +318,22 @@ def _write_checkpoints(
     raw_rows: List[Dict[str, Any]],
     n_list: List[int],
     fairness_modes: List[str],
+    compression_suites: List[str],
 ) -> None:
     """Persist intermediate outputs so long runs survive timeout/preemption."""
     Path("results").mkdir(exist_ok=True)
-    summary_rows = _build_summary_rows(raw_rows, n_list=n_list, fairness_modes=fairness_modes)
-    pairwise_rows = _build_pairwise_rows(raw_rows, n_list=n_list, fairness_modes=fairness_modes)
+    summary_rows = _build_summary_rows(
+        raw_rows,
+        n_list=n_list,
+        fairness_modes=fairness_modes,
+        compression_suites=compression_suites,
+    )
+    pairwise_rows = _build_pairwise_rows(
+        raw_rows,
+        n_list=n_list,
+        fairness_modes=fairness_modes,
+        compression_suites=compression_suites,
+    )
     _save_csv("results/robust_external_raw.csv", raw_rows)
     _save_csv("results/robust_external_summary.csv", summary_rows)
     _save_csv("results/robust_external_pairwise_tests.csv", pairwise_rows)
@@ -309,7 +345,13 @@ def _write_checkpoints(
         json.dump(pairwise_rows, f, indent=2)
 
 
-def _profile_bank(num_clients: int, model_cfg: Dict[str, Any], topk_fracs: List[float]) -> Dict[str, List[Dict[str, Any]]]:
+def _profile_bank(
+    num_clients: int,
+    model_cfg: Dict[str, Any],
+    topk_fracs: List[float],
+    compression_suite: str,
+    profile_trials_per_family: int,
+) -> Dict[str, List[Dict[str, Any]]]:
     n_params = _estimate_model_param_count(model_cfg)
     k_vals = [max(200, int(n_params * float(fr))) for fr in topk_fracs]
     # Keep improved async buffering conservative at large scale to avoid
@@ -317,70 +359,76 @@ def _profile_bank(num_clients: int, model_cfg: Dict[str, Any], topk_fracs: List[
     base_min_buffer = int(np.clip(np.sqrt(max(1, num_clients)) / 3.0, 3, 5))
     base_max_buffer = int(np.clip(base_min_buffer * 2, 6, 10))
     k_common = k_vals[min(1, len(k_vals) - 1)]
+    suite = str(compression_suite).strip().lower()
+
+    if suite == "none":
+        comp_cfg = {"compression": None}
+    elif suite == "topk":
+        comp_cfg = {"compression": "topk", "k": k_common}
+    elif suite == "qsgd":
+        comp_cfg = {"compression": "qsgd", "num_bits": 8}
+    else:
+        raise ValueError(f"Unknown compression_suite: {compression_suite}")
+
+    n_trials = max(1, int(profile_trials_per_family))
+    trial_scales = np.linspace(0.9, 1.1, n_trials, dtype=np.float64).tolist()
+
+    fedavg_bank = []
+    fedasync_bank = []
+    fedbuff_bank = []
+    scaffold_bank = []
+    improved_bank = []
+    for s in trial_scales:
+        fedavg_bank.append({
+            "strict_reproduction": True,
+            "participation_rate": float(np.clip(0.6 * s, 0.4, 0.8)),
+            "use_timeout": False,
+            "max_round_time": 10.0,
+            **comp_cfg,
+        })
+        fedasync_bank.append({
+            "max_staleness": int(round(10 * s)),
+            "learning_rate": float(np.clip(0.8 * s, 0.5, 1.2)),
+            "staleness_mode": "linear",
+            "staleness_floor": 0.1,
+            "server_tick_sec": 0.02,
+            **comp_cfg,
+        })
+        fedbuff_bank.append({
+            "buffer_size": int(np.clip(round(5 * s), 3, 8)),
+            "max_staleness": int(np.clip(round(15 * s), 10, 20)),
+            "server_lr": 0.2,
+            "gradient_clip": 5.0,
+            **comp_cfg,
+        })
+        scaffold_bank.append({
+            "strict_reproduction": True,
+            "participation_rate": float(np.clip(0.6 * s, 0.4, 0.8)),
+            "use_timeout": False,
+            "learning_rate": float(np.clip(0.8 * s, 0.5, 1.2)),
+            "max_round_time": 10.0,
+            **comp_cfg,
+        })
+        improved_bank.append({
+            "max_staleness": int(np.clip(round(15 * s), 12, 18)),
+            "min_buffer_size": base_min_buffer,
+            "max_buffer_size": base_max_buffer,
+            "momentum": 0.55,
+            "adaptive_weighting": True,
+            "auto_scale_params": False,
+            "staleness_quantile": 0.9,
+            "server_lr": float(np.clip(0.35 * s, 0.25, 0.45)),
+            "gradient_clip": 5.0,
+            "include_staleness_in_quality": True,
+            **comp_cfg,
+        })
+
     return {
-        "fedavg": [
-            {"strict_reproduction": True, "participation_rate": 0.5, "use_timeout": False, "max_round_time": 10.0},
-            {"strict_reproduction": True, "participation_rate": 0.6, "use_timeout": False, "max_round_time": 10.0, "compression": "qsgd", "num_bits": 8},
-            {"strict_reproduction": True, "participation_rate": 0.7, "use_timeout": False, "max_round_time": 10.0, "compression": "topk", "k": k_common},
-        ],
-        "fedasync": [
-            {"max_staleness": 8, "learning_rate": 0.6, "staleness_mode": "linear", "staleness_floor": 0.1, "server_tick_sec": 0.02},
-            {"max_staleness": 10, "learning_rate": 0.8, "staleness_mode": "linear", "staleness_floor": 0.1, "server_tick_sec": 0.02, "compression": "qsgd", "num_bits": 8},
-            {"max_staleness": 15, "learning_rate": 1.0, "staleness_mode": "linear", "staleness_floor": 0.1, "server_tick_sec": 0.02, "compression": "topk", "k": k_common},
-        ],
-        "fedbuff": [
-            {"buffer_size": 3, "max_staleness": 10, "server_lr": 0.2, "gradient_clip": 5.0},
-            {"buffer_size": 5, "max_staleness": 15, "server_lr": 0.2, "gradient_clip": 5.0, "compression": "qsgd", "num_bits": 8},
-            {"buffer_size": 8, "max_staleness": 20, "server_lr": 0.2, "gradient_clip": 5.0, "compression": "topk", "k": k_common},
-        ],
-        "scaffold": [
-            {"strict_reproduction": True, "participation_rate": 0.5, "use_timeout": False, "learning_rate": 0.6, "max_round_time": 10.0},
-            {"strict_reproduction": True, "participation_rate": 0.6, "use_timeout": False, "learning_rate": 0.8, "max_round_time": 10.0, "compression": "qsgd", "num_bits": 8},
-            {"strict_reproduction": True, "participation_rate": 0.7, "use_timeout": False, "learning_rate": 1.0, "max_round_time": 10.0, "compression": "topk", "k": k_common},
-        ],
-        "improved_async": [
-            {
-                "max_staleness": 15,
-                "min_buffer_size": base_min_buffer,
-                "max_buffer_size": base_max_buffer,
-                "momentum": 0.6,
-                "adaptive_weighting": True,
-                "auto_scale_params": False,
-                "compression": None,
-                "staleness_quantile": 0.9,
-                "server_lr": 0.4,
-                "gradient_clip": 5.0,
-                "include_staleness_in_quality": True,
-            },
-            {
-                "max_staleness": 15,
-                "min_buffer_size": base_min_buffer,
-                "max_buffer_size": base_max_buffer,
-                "momentum": 0.5,
-                "adaptive_weighting": True,
-                "auto_scale_params": False,
-                "compression": "qsgd",
-                "num_bits": 8,
-                "staleness_quantile": 0.9,
-                "server_lr": 0.35,
-                "gradient_clip": 5.0,
-                "include_staleness_in_quality": True,
-            },
-            {
-                "max_staleness": 18,
-                "min_buffer_size": max(3, base_min_buffer - 1),
-                "max_buffer_size": max(7, base_max_buffer - 1),
-                "momentum": 0.5,
-                "adaptive_weighting": True,
-                "auto_scale_params": False,
-                "compression": "topk",
-                "k": k_common,
-                "staleness_quantile": 0.9,
-                "server_lr": 0.35,
-                "gradient_clip": 5.0,
-                "include_staleness_in_quality": True,
-            },
-        ],
+        "fedavg": fedavg_bank,
+        "fedasync": fedasync_bank,
+        "fedbuff": fedbuff_bank,
+        "scaffold": scaffold_bank,
+        "improved_async": improved_bank,
     }
 
 
@@ -400,6 +448,18 @@ def main():
     p.add_argument("--track_interval_updates", type=int, default=20)
     p.add_argument("--acc_thresholds", type=str, default="0.20,0.25")
     p.add_argument("--topk_fractions", type=str, default="0.01,0.03,0.05")
+    p.add_argument(
+        "--compression_suites",
+        type=str,
+        default="none,topk,qsgd",
+        help="Matched compression suites applied to all protocol families.",
+    )
+    p.add_argument(
+        "--profile_trials_per_family",
+        type=int,
+        default=3,
+        help="Equal tuning budget: number of profiles per protocol family.",
+    )
     p.add_argument("--dominant_ratio", type=float, default=0.7)
     p.add_argument("--gamma_min", type=float, default=0.75)
     p.add_argument("--gamma_max", type=float, default=1.30)
@@ -418,6 +478,7 @@ def main():
     n_list = [int(x.strip()) for x in args.num_clients_list.split(",") if x.strip()]
     fairness_modes = [x.strip() for x in args.fairness_modes.split(",") if x.strip()]
     topk_fracs = [float(x.strip()) for x in args.topk_fractions.split(",") if x.strip()]
+    compression_suites = [str(x).strip().lower() for x in args.compression_suites.split(",") if str(x).strip()]
     thresholds = [float(x.strip()) for x in args.acc_thresholds.split(",") if x.strip()]
 
     model_cfg = {
@@ -434,7 +495,6 @@ def main():
     try:
         for n_clients in n_list:
             print(f"\n========== Scale n={n_clients} ==========", flush=True)
-            profile_bank = _profile_bank(n_clients, model_cfg=model_cfg, topk_fracs=topk_fracs)
             target_updates = int(args.rounds * max(1, int(n_clients * args.participation_rate)))
 
             for seed_offset in range(args.seeds):
@@ -469,49 +529,69 @@ def main():
                     )
                     schedule_hash = hashlib.sha256(schedule_base.encode("utf-8")).hexdigest()
                     active_selection_seed = int(schedule_hash[:8], 16)
-                    for proto, cfgs in profile_bank.items():
-                        for idx, cfg in enumerate(cfgs):
-                            key = f"{proto}_p{idx}"
-                            row = run_once(
-                                protocol_key=key,
-                                protocol_name=proto,
-                                protocol_cfg=cfg,
-                                client_datasets=client_datasets,
-                                test_dataset=test_ds,
-                                model_cfg=model_cfg,
-                                rounds=args.rounds,
-                                fairness_mode=mode,
-                                target_updates=target_updates,
-                                local_epochs=args.local_epochs,
-                                local_lr=args.local_lr,
-                                participation_rate=args.participation_rate,
-                                comm_budget_mb=args.comm_budget_mb,
-                                track_interval_updates=args.track_interval_updates,
-                                acc_thresholds=thresholds,
-                                device=args.device,
-                                active_selection_seed=active_selection_seed,
-                                schedule_hash=schedule_hash,
-                            )
-                            row["num_clients"] = int(n_clients)
-                            row["seed"] = int(seed)
-                            row["protocol_family"] = proto
-                            row["profile_idx"] = int(idx)
-                            row.pop("trace", None)  # raw trace can be huge; keep per-run compact here
-                            raw_rows.append(row)
-                            print(
-                                f"{key:22s} acc={row['accuracy']:.4f} bal={row['score_balanced']:.4f} comm={row['communication_mb']:.2f}MB",
-                                flush=True,
-                            )
+                    for compression_suite in compression_suites:
+                        profile_bank = _profile_bank(
+                            n_clients,
+                            model_cfg=model_cfg,
+                            topk_fracs=topk_fracs,
+                            compression_suite=compression_suite,
+                            profile_trials_per_family=int(args.profile_trials_per_family),
+                        )
+                        for proto, cfgs in profile_bank.items():
+                            for idx, cfg in enumerate(cfgs):
+                                key = f"{proto}_{compression_suite}_p{idx}"
+                                row = run_once(
+                                    protocol_key=key,
+                                    protocol_name=proto,
+                                    protocol_cfg=cfg,
+                                    client_datasets=client_datasets,
+                                    test_dataset=test_ds,
+                                    model_cfg=model_cfg,
+                                    rounds=args.rounds,
+                                    fairness_mode=mode,
+                                    target_updates=target_updates,
+                                    local_epochs=args.local_epochs,
+                                    local_lr=args.local_lr,
+                                    participation_rate=args.participation_rate,
+                                    comm_budget_mb=args.comm_budget_mb,
+                                    track_interval_updates=args.track_interval_updates,
+                                    acc_thresholds=thresholds,
+                                    device=args.device,
+                                    active_selection_seed=active_selection_seed,
+                                    schedule_hash=schedule_hash,
+                                )
+                                row["num_clients"] = int(n_clients)
+                                row["seed"] = int(seed)
+                                row["protocol_family"] = proto
+                                row["compression_suite"] = str(compression_suite)
+                                row["profile_idx"] = int(idx)
+                                row["profile_budget_profiles"] = int(args.profile_trials_per_family)
+                                row.pop("trace", None)  # raw trace can be huge; keep per-run compact here
+                                raw_rows.append(row)
+                                print(
+                                    f"{key:28s} acc={row['accuracy']:.4f} bal={row['score_balanced']:.4f} comm={row['communication_mb']:.2f}MB",
+                                    flush=True,
+                                )
 
                     if args.checkpoint_every_mode:
-                        _write_checkpoints(raw_rows, n_list=n_list, fairness_modes=fairness_modes)
+                        _write_checkpoints(
+                            raw_rows,
+                            n_list=n_list,
+                            fairness_modes=fairness_modes,
+                            compression_suites=compression_suites,
+                        )
                         print(
                             f"[checkpoint] saved partial results after n={n_clients}, seed={seed}, mode={mode}",
                             flush=True,
                         )
     finally:
         # Final checkpoint always written, even if interrupted/failed.
-        _write_checkpoints(raw_rows, n_list=n_list, fairness_modes=fairness_modes)
+        _write_checkpoints(
+            raw_rows,
+            n_list=n_list,
+            fairness_modes=fairness_modes,
+            compression_suites=compression_suites,
+        )
 
     print("\nSaved:")
     print("- results/robust_external_raw.csv")

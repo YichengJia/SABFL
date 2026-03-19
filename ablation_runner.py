@@ -12,7 +12,7 @@ import argparse
 import numpy as np
 import torch
 
-from federated_protocol_framework import create_protocol, ClientUpdate
+from federated_protocol_framework import create_protocol, ClientUpdate, build_scaffold_control_payload
 from metrics import tri_objective_score, pareto_front_mask
 from unified_protocol_comparison import (
     SimpleNN,
@@ -72,6 +72,15 @@ def run_single_experiment(
                     update_dict[pname] = pnew.float() - global_state[pname].float()
 
             use_scaffold = hasattr(protocol, "get_scaffold_controls")
+            scaffold_payload = None
+            if use_scaffold and scaffold_c_global is not None and scaffold_c_client is not None:
+                scaffold_payload = build_scaffold_control_payload(
+                    update_delta=update_dict,
+                    c_global=scaffold_c_global,
+                    c_client=scaffold_c_client,
+                    local_steps=int(local_steps),
+                    local_lr=float(local_lr),
+                )
             update = ClientUpdate(
                 client_id=f"client_{cid}",
                 update_data=update_dict,
@@ -81,6 +90,7 @@ def run_single_experiment(
                 timestamp=time.time(),
                 local_steps=int(local_steps) if use_scaffold else None,
                 local_lr=float(local_lr) if use_scaffold else None,
+                scaffold_control_payload=scaffold_payload,
             )
             protocol.receive_update(update)
 

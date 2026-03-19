@@ -24,7 +24,7 @@ plt.rcParams['font.family'] = 'DejaVu Serif'
 plt.rcParams['axes.unicode_minus'] = False
 
 from federated_protocol_framework import (
-    create_protocol, ClientUpdate, FederatedProtocol
+    create_protocol, ClientUpdate, FederatedProtocol, build_scaffold_control_payload
 )
 from optimized_protocol_config import generate_all_configs
 from paper_profiles import build_protocol_suite
@@ -618,6 +618,15 @@ def compare_protocols(protocols_config: Dict, experiment_config: Dict) -> Dict:
                         param_update = param.clone().float()
                         global_param = global_state[param_name].clone().float()
                         update_dict[param_name] = param_update - global_param
+                scaffold_payload = None
+                if base_name == "scaffold" and scaffold_c_global is not None and scaffold_c_client is not None:
+                    scaffold_payload = build_scaffold_control_payload(
+                        update_delta=update_dict,
+                        c_global=scaffold_c_global,
+                        c_client=scaffold_c_client,
+                        local_steps=int(local_steps),
+                        local_lr=0.01,
+                    )
 
                 update = ClientUpdate(
                     client_id=f"client_{client_id}",
@@ -628,6 +637,7 @@ def compare_protocols(protocols_config: Dict, experiment_config: Dict) -> Dict:
                     timestamp=time.time(),
                     local_steps=int(local_steps) if base_name == "scaffold" else None,
                     local_lr=0.01 if base_name == "scaffold" else None,
+                    scaffold_control_payload=scaffold_payload,
                 )
                 protocol.receive_update(update)
 

@@ -33,6 +33,36 @@ class ClientUpdate:
     # For SCAFFOLD canonical control variate updates
     local_steps: Optional[int] = None
     local_lr: Optional[float] = None
+    # Explicit SCAFFOLD uplink payload: delta_c (or equivalent control payload).
+    scaffold_control_payload: Optional[Dict[str, torch.Tensor]] = None
+
+
+def build_scaffold_control_payload(
+    update_delta: Dict[str, torch.Tensor],
+    c_global: Dict[str, torch.Tensor],
+    c_client: Dict[str, torch.Tensor],
+    local_steps: int,
+    local_lr: float,
+) -> Dict[str, torch.Tensor]:
+    """
+    Build explicit SCAFFOLD client->server control payload (delta_c_i).
+
+    Canonical relation:
+      c_i_new = c_i_old - c - delta/(K*eta), where delta = (w_i - w)
+      delta_c_i = c_i_new - c_i_old
+    """
+    k_steps = max(1, int(local_steps))
+    eta = float(local_lr)
+    denom = max(float(k_steps) * eta, 1e-12)
+
+    payload: Dict[str, torch.Tensor] = {}
+    for name, delta in update_delta.items():
+        delta_f = delta.float()
+        c_old = c_client[name].float() if name in c_client else torch.zeros_like(delta_f, dtype=torch.float32)
+        c_g = c_global[name].float() if name in c_global else torch.zeros_like(delta_f, dtype=torch.float32)
+        c_new = c_old - c_g - (delta_f / denom)
+        payload[name] = (c_new - c_old).detach().cpu()
+    return payload
 
 
 class ProtocolMetrics:
@@ -1066,7 +1096,11 @@ class Scaffold(FederatedProtocol):
             return
         self.c_global = {k: torch.zeros_like(v, dtype=torch.float32) for k, v in self.global_model.items()}
 
-    def get_scaffold_controls(self, client_id: str) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    def get_scaffold_controls(
+        self,
+        client_id: str,
+        account_communication: bool = True,
+    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
         """Return (c, c_i) for a given client. Initialized lazily."""
         # Ensure c_global exists.
         if not getattr(self, "c_global", None) and self.global_model is not None:
@@ -1080,7 +1114,7 @@ class Scaffold(FederatedProtocol):
                 if k not in self.client_controls[client_id]:
                     self.client_controls[client_id][k] = torch.zeros_like(v, dtype=torch.float32)
 
-        if getattr(self, "account_control_downlink", True):
+        if account_communication and getattr(self, "account_control_downlink", True):
             # Account explicit downlink of control variates c and c_i.
             downlink_bytes = (
                 self.calculate_tensor_dict_size(self.c_global)
@@ -1134,7 +1168,7 @@ class Scaffold(FederatedProtocol):
     def receive_update(self, update: ClientUpdate) -> Tuple[bool, int]:
         with self._lock:
             control_payload_bytes = (
-                self.calculate_tensor_dict_size(update.update_data)
+                self.calculate_tensor_dict_size(update.scaffold_control_payload or {})
                 if getattr(self, "account_control_uplink", True)
                 else 0
             )
@@ -1241,7 +1275,7 @@ class Scaffold(FederatedProtocol):
 
         for update in decompressed_buffer:
             client_id = update.client_id
-            c_old, c_i_old = self.get_scaffold_controls(client_id)
+            c_old, c_i_old = self.get_scaffold_controls(client_id, account_communication=False)
             # Use server control c as of the start of the round.
             c_start = c_global_old
 
@@ -1258,8 +1292,15 @@ class Scaffold(FederatedProtocol):
                     c_global_old[name] = c_start[name].clone()
                     control_delta_sum[name] = torch.zeros_like(delta, dtype=torch.float32)
 
-                delta_f = delta.float()
-                c_i_new = c_i_old[name] - c_start[name] - (delta_f / denom)
+                payload = update.scaffold_control_payload or {}
+                if name in payload:
+                    delta_c = payload[name].float()
+                    c_i_new = c_i_old[name] + delta_c
+                else:
+                    # Backward-compatible fallback when explicit control payload is absent.
+                    delta_f = delta.float()
+                    c_i_new = c_i_old[name] - c_start[name] - (delta_f / denom)
+
                 control_delta_sum[name] += (c_i_new - c_i_old[name])
                 c_i_old[name] = c_i_new
 

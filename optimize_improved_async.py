@@ -6,7 +6,7 @@ Find optimal parameters for improved async protocol
 import torch
 import numpy as np
 import time
-from federated_protocol_framework import create_protocol, ClientUpdate
+from federated_protocol_framework import create_protocol, ClientUpdate, build_scaffold_control_payload
 from unified_protocol_comparison import SimpleNN, generate_federated_data, train_client, evaluate_model, \
     evaluate_with_intent_and_explanation
 import json
@@ -66,6 +66,15 @@ def test_configuration(config, client_datasets, test_dataset, model_config, num_
 
             # Submit update
             use_scaffold = hasattr(protocol, "get_scaffold_controls")
+            scaffold_payload = None
+            if use_scaffold and scaffold_c_global is not None and scaffold_c_client is not None:
+                scaffold_payload = build_scaffold_control_payload(
+                    update_delta=update_dict,
+                    c_global=scaffold_c_global,
+                    c_client=scaffold_c_client,
+                    local_steps=int(local_steps),
+                    local_lr=float(lr),
+                )
             update = ClientUpdate(
                 client_id=f"client_{client_id}",
                 update_data=update_dict,
@@ -75,6 +84,7 @@ def test_configuration(config, client_datasets, test_dataset, model_config, num_
                 timestamp=0.0,
                 local_steps=int(local_steps) if use_scaffold else None,
                 local_lr=float(lr) if use_scaffold else None,
+                scaffold_control_payload=scaffold_payload,
             )
             protocol.receive_update(update)
 
@@ -478,6 +488,15 @@ def compare_with_baseline():
                         update_dict[param_name] = param.float() - global_state[param_name].float()
 
                 use_scaffold = hasattr(protocol, 'get_scaffold_controls')
+                scaffold_payload = None
+                if use_scaffold and scaffold_c_global is not None and scaffold_c_client is not None:
+                    scaffold_payload = build_scaffold_control_payload(
+                        update_delta=update_dict,
+                        c_global=scaffold_c_global,
+                        c_client=scaffold_c_client,
+                        local_steps=int(local_steps),
+                        local_lr=float(lr),
+                    )
                 update = ClientUpdate(
                     client_id=f"client_{client_id}",
                     update_data=update_dict,
@@ -487,6 +506,7 @@ def compare_with_baseline():
                     timestamp=0.0,
                     local_steps=int(local_steps) if use_scaffold else None,
                     local_lr=float(lr) if use_scaffold else None,
+                    scaffold_control_payload=scaffold_payload,
                 )
                 protocol.receive_update(update)
 

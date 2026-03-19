@@ -19,7 +19,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 
-from federated_protocol_framework import create_protocol, ClientUpdate
+from federated_protocol_framework import create_protocol, ClientUpdate, build_scaffold_control_payload
 from unified_protocol_comparison import SimpleNN, evaluate_with_intent_and_explanation, set_seed
 from metrics import tri_objective_score, pareto_front_mask
 from paper_profiles import build_protocol_suite
@@ -515,6 +515,15 @@ def run_once(
             for name, pnew in updated_state.items():
                 if name in gstate and "num_batches_tracked" not in name:
                     delta[name] = pnew.float() - gstate[name].float()
+            scaffold_payload = None
+            if protocol_name == "scaffold" and scaffold_c_global is not None and scaffold_c_client is not None:
+                scaffold_payload = build_scaffold_control_payload(
+                    update_delta=delta,
+                    c_global=scaffold_c_global,
+                    c_client=scaffold_c_client,
+                    local_steps=int(local_steps),
+                    local_lr=float(local_lr),
+                )
             update = ClientUpdate(
                 client_id=client_id,
                 update_data=delta,
@@ -524,6 +533,7 @@ def run_once(
                 timestamp=time.time(),
                 local_steps=int(local_steps) if protocol_name == "scaffold" else None,
                 local_lr=float(local_lr) if protocol_name == "scaffold" else None,
+                scaffold_control_payload=scaffold_payload,
             )
             accepted, _ = protocol.receive_update(update)
             sent_updates += 1

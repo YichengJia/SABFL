@@ -5,7 +5,7 @@ from collections import defaultdict
 import torch
 from torch.utils.data import DataLoader
 
-from federated_protocol_framework import create_protocol, ClientUpdate
+from federated_protocol_framework import create_protocol, ClientUpdate, build_scaffold_control_payload
 from unified_protocol_comparison import SimpleNN, generate_federated_data, train_client, set_seed
 from unified_protocol_comparison import evaluate_with_intent_and_explanation
 from metrics import tri_objective_score, pareto_front_mask
@@ -118,6 +118,15 @@ def main():
                     for name, p_new in updated_state.items():
                         if "num_batches_tracked" not in name:
                             update_dict[name] = p_new.float()
+                scaffold_payload = None
+                if proto == "scaffold" and scaffold_c_global is not None and scaffold_c_client is not None:
+                    scaffold_payload = build_scaffold_control_payload(
+                        update_delta=update_dict,
+                        c_global=scaffold_c_global,
+                        c_client=scaffold_c_client,
+                        local_steps=int(local_steps),
+                        local_lr=0.01,
+                    )
 
                 update = ClientUpdate(
                     client_id=str(cid),
@@ -128,6 +137,7 @@ def main():
                     timestamp=time.time(),
                     local_steps=int(local_steps) if proto == "scaffold" else None,
                     local_lr=0.01 if proto == "scaffold" else None,
+                    scaffold_control_payload=scaffold_payload,
                 )
                 protocol.receive_update(update)
         comm_ref_mb = float(protocol.metrics.metrics.get("total_data_transmitted_mb", 1.0))
@@ -186,6 +196,15 @@ def main():
                         for name, p_new in updated_state.items():
                             if "num_batches_tracked" not in name:
                                 update_dict[name] = p_new.float()
+                    scaffold_payload = None
+                    if proto == "scaffold" and scaffold_c_global is not None and scaffold_c_client is not None:
+                        scaffold_payload = build_scaffold_control_payload(
+                            update_delta=update_dict,
+                            c_global=scaffold_c_global,
+                            c_client=scaffold_c_client,
+                            local_steps=int(local_steps),
+                            local_lr=0.01,
+                        )
 
                     update = ClientUpdate(
                         client_id=str(cid),
@@ -196,6 +215,7 @@ def main():
                         timestamp=time.time(),
                         local_steps=int(local_steps) if proto == "scaffold" else None,
                         local_lr=0.01 if proto == "scaffold" else None,
+                        scaffold_control_payload=scaffold_payload,
                     )
                     protocol.receive_update(update)
 
