@@ -77,6 +77,8 @@ class ProtocolMetrics:
             'buffer_occupancy_p90': 0.0,
             'buffer_wait_sec_mean': 0.0,
             'buffer_wait_sec_p90': 0.0,
+            'control_payload_uplink_mb': 0.0,
+            'control_payload_downlink_mb': 0.0,
 
             # Time series data
             'accuracy_history': [],
@@ -109,6 +111,16 @@ class ProtocolMetrics:
             self.metrics['total_updates_accepted'] += 1
         else:
             self.metrics['total_updates_rejected'] += 1
+
+    def add_overhead_communication(self, data_size_bytes: float, bucket: str = "control_payload_uplink_mb"):
+        """
+        Add payload overhead in BYTES without touching update acceptance counters.
+        Used for protocol-specific extra payloads (e.g., SCAFFOLD controls).
+        """
+        mb = float(data_size_bytes) / (1024.0 * 1024.0)
+        self.metrics['total_data_transmitted_mb'] += mb
+        if bucket in self.metrics:
+            self.metrics[bucket] += mb
 
     def update_performance(self, accuracy: float, loss: float, timestamp: float):
         """Update performance metrics"""
@@ -263,6 +275,16 @@ class FederatedProtocol(ABC):
                 if isinstance(v, torch.Tensor):
                     total += v.numel() * v.element_size()
         return total
+
+    def calculate_tensor_dict_size(self, tensor_data: Dict[str, Any]) -> int:
+        """Return dense tensor payload size in bytes."""
+        total = 0
+        for _, v in tensor_data.items():
+            if isinstance(v, torch.Tensor):
+                total += int(v.numel() * v.element_size())
+            elif hasattr(v, "nbytes"):
+                total += int(v.nbytes)
+        return int(total)
 
     def shutdown(self):
         """Shutdown protocol"""
@@ -1058,6 +1080,16 @@ class Scaffold(FederatedProtocol):
                 if k not in self.client_controls[client_id]:
                     self.client_controls[client_id][k] = torch.zeros_like(v, dtype=torch.float32)
 
+        if getattr(self, "account_control_downlink", True):
+            # Account explicit downlink of control variates c and c_i.
+            downlink_bytes = (
+                self.calculate_tensor_dict_size(self.c_global)
+                + self.calculate_tensor_dict_size(self.client_controls[client_id])
+            )
+            self.metrics.add_overhead_communication(
+                downlink_bytes,
+                bucket="control_payload_downlink_mb",
+            )
         return self.c_global, self.client_controls[client_id]
 
     def configure(self, **kwargs):
@@ -1086,6 +1118,9 @@ class Scaffold(FederatedProtocol):
             self.compressor = QSGDCompressor(kwargs.get('num_bits', 8))
         else:
             self.compressor = None
+        # Communication accounting switches for canonical SCAFFOLD control payloads.
+        self.account_control_uplink = bool(kwargs.get("account_control_uplink", True))
+        self.account_control_downlink = bool(kwargs.get("account_control_downlink", True))
 
         # Global control variate (same shape as model)
         self.c_global = {}
@@ -1098,11 +1133,21 @@ class Scaffold(FederatedProtocol):
 
     def receive_update(self, update: ClientUpdate) -> Tuple[bool, int]:
         with self._lock:
+            control_payload_bytes = (
+                self.calculate_tensor_dict_size(update.update_data)
+                if getattr(self, "account_control_uplink", True)
+                else 0
+            )
             if update.model_version != self.current_round:
                 self.metrics.update_communication(
                     self.calculate_update_size(update.update_data),
                     accepted=False
                 )
+                if control_payload_bytes > 0:
+                    self.metrics.add_overhead_communication(
+                        control_payload_bytes,
+                        bucket="control_payload_uplink_mb",
+                    )
                 return False, self.current_round
 
             # Optional compression before storing
@@ -1119,6 +1164,11 @@ class Scaffold(FederatedProtocol):
             # Record communication
             update_size = self.calculate_update_size(update.update_data)
             self.metrics.update_communication(update_size, accepted=True)
+            if control_payload_bytes > 0:
+                self.metrics.add_overhead_communication(
+                    control_payload_bytes,
+                    bucket="control_payload_uplink_mb",
+                )
 
             # Aggregate when enough clients joined or timeout
             if self.strict_reproduction:
