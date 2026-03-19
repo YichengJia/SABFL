@@ -1,0 +1,250 @@
+{
+  "A0_full": {
+    "config": {
+      "max_staleness": 15,
+      "min_buffer_size": 3,
+      "max_buffer_size": 8,
+      "adaptive_weighting": true,
+      "momentum": 0.85,
+      "compression": "topk",
+      "k": 100,
+      "auto_scale_params": true,
+      "staleness_mode": "quadratic",
+      "staleness_floor": 0.2,
+      "staleness_quantile": 0.9,
+      "enable_staleness_adaptation": true,
+      "enable_health_relaxation": true,
+      "server_lr": 0.2,
+      "gradient_clip": 2.0,
+      "participation_rate": 0.8164965809277261
+    },
+    "metrics": {
+      "accuracy": 0.2537313432835821,
+      "loss": 1.4492998994998079,
+      "intent_f1": 0.16070010742141888,
+      "bleu": 0.0335195530726257,
+      "communication_mb": 0.184844970703125,
+      "elapsed_sec": 2.376829147338867,
+      "aggregations": 2,
+      "tri_objective": 0.3516226560678055,
+      "pareto_optimal": false
+    }
+  },
+  "A1_no_auto_scale": {
+    "config": {
+      "max_staleness": 15,
+      "min_buffer_size": 3,
+      "max_buffer_size": 8,
+      "adaptive_weighting": true,
+      "momentum": 0.85,
+      "compression": "topk",
+      "k": 100,
+      "auto_scale_params": false,
+      "staleness_mode": "quadratic",
+      "staleness_floor": 0.2,
+      "staleness_quantile": 0.9,
+      "enable_staleness_adaptation": true,
+      "enable_health_relaxation": true,
+      "server_lr": 0.2,
+      "gradient_clip": 2.0,
+      "participation_rate": 0.8164965809277261
+    },
+    "metrics": {
+      "accuracy": 0.34328358208955223,
+      "loss": 1.4484582605646616,
+      "intent_f1": 0.24507389162561577,
+      "bleu": 0.04469273743016759,
+      "communication_mb": 0.184844970703125,
+      "elapsed_sec": 0.6152372360229492,
+      "aggregations": 2,
+      "tri_objective": 0.48230655214679774,
+      "pareto_optimal": true
+    }
+  },
+  "A2_no_staleness_adapt": {
+    "config": {
+      "max_staleness": 15,
+      "min_buffer_size": 3,
+      "max_buffer_size": 8,
+      "adaptive_weighting": true,
+      "momentum": 0.85,
+      "compression": "topk",
+      "k": 100,
+      "auto_scale_params": true,
+      "staleness_mode": "quadratic",
+      "staleness_floor": 0.2,
+      "staleness_quantile": 0.9,
+      "enable_staleness_adaptation": false,
+      "enable_health_relaxation": false,
+      "server_lr": 0.2,
+      "gradient_clip": 2.0,
+      "participation_rate": 0.8164965809277261
+    },
+    "metrics": {
+      "accuracy": 0.26865671641791045,
+      "loss": 1.3715395909636767,
+      "intent_f1": 0.2277030976037405,
+      "bleu": 0.035381750465549346,
+      "communication_mb": 0.184844970703125,
+      "elapsed_sec": 0.6164901256561279,
+      "aggregations": 2,
+      "tri_objective": 0.4372798548171769,
+      "pareto_optimal": false
+    }
+  },
+  "A3_no_adaptive_weighting": {
+    "config": {
+      "max_staleness": 15,
+      "min_buffer_size": 3,
+      "max_buffer_size": 8,
+      "adaptive_weighting": false,
+      "momentum": 0.85,
+      "compression": "topk",
+      "k": 100,
+      "auto_scale_params": true,
+      "staleness_mode": "quadratic",
+      "staleness_floor": 0.2,
+      "staleness_quantile": 0.9,
+      "enable_staleness_adaptation": true,
+      "enable_health_relaxation": true,
+      "server_lr": 0.2,
+      "gradient_clip": 2.0,
+      "participation_rate": 0.8164965809277261
+    },
+    "metrics": {
+      "accuracy": 0.16417910447761194,
+      "loss": 1.4002449423519534,
+      "intent_f1": 0.11623931623931626,
+      "bleu": 0.022346368715083803,
+      "communication_mb": 0.184844970703125,
+      "elapsed_sec": 0.614915132522583,
+      "aggregations": 2,
+      "tri_objective": 0.37490828627970685,
+      "pareto_optimal": false
+    }
+  },
+  "A4_no_momentum": {
+    "config": {
+      "max_staleness": 15,
+      "min_buffer_size": 3,
+      "max_buffer_size": 8,
+      "adaptive_weighting": true,
+      "momentum": 0.0,
+      "compression": "topk",
+      "k": 100,
+      "auto_scale_params": true,
+      "staleness_mode": "quadratic",
+      "staleness_floor": 0.2,
+      "staleness_quantile": 0.9,
+      "enable_staleness_adaptation": true,
+      "enable_health_relaxation": true,
+      "server_lr": 0.2,
+      "gradient_clip": 2.0,
+      "participation_rate": 0.8164965809277261
+    },
+    "metrics": {
+      "accuracy": 0.19402985074626866,
+      "loss": 1.3915871168250469,
+      "intent_f1": 0.1313632441760138,
+      "bleu": 0.0260707635009311,
+      "communication_mb": 0.184844970703125,
+      "elapsed_sec": 0.6073954105377197,
+      "aggregations": 2,
+      "tri_objective": 0.3943226784378735,
+      "pareto_optimal": false
+    }
+  },
+  "A5_no_compression": {
+    "config": {
+      "max_staleness": 15,
+      "min_buffer_size": 3,
+      "max_buffer_size": 8,
+      "adaptive_weighting": true,
+      "momentum": 0.85,
+      "compression": null,
+      "k": 100,
+      "auto_scale_params": true,
+      "staleness_mode": "quadratic",
+      "staleness_floor": 0.2,
+      "staleness_quantile": 0.9,
+      "enable_staleness_adaptation": true,
+      "enable_health_relaxation": true,
+      "server_lr": 0.2,
+      "gradient_clip": 2.0,
+      "participation_rate": 0.8164965809277261
+    },
+    "metrics": {
+      "accuracy": 0.22388059701492538,
+      "loss": 1.9111351041651483,
+      "intent_f1": 0.09146341463414634,
+      "bleu": 0.029795158286778402,
+      "communication_mb": 3.6563873291015625,
+      "elapsed_sec": 0.565523624420166,
+      "aggregations": 2,
+      "tri_objective": 0.40903567556125014,
+      "pareto_optimal": true
+    }
+  },
+  "A6_linear_staleness": {
+    "config": {
+      "max_staleness": 15,
+      "min_buffer_size": 3,
+      "max_buffer_size": 8,
+      "adaptive_weighting": true,
+      "momentum": 0.85,
+      "compression": "topk",
+      "k": 100,
+      "auto_scale_params": true,
+      "staleness_mode": "linear",
+      "staleness_floor": 0.2,
+      "staleness_quantile": 0.9,
+      "enable_staleness_adaptation": true,
+      "enable_health_relaxation": true,
+      "server_lr": 0.2,
+      "gradient_clip": 2.0,
+      "participation_rate": 0.8164965809277261
+    },
+    "metrics": {
+      "accuracy": 0.2537313432835821,
+      "loss": 1.3760165830156696,
+      "intent_f1": 0.1412037037037037,
+      "bleu": 0.0335195530726257,
+      "communication_mb": 0.184844970703125,
+      "elapsed_sec": 0.5916347503662109,
+      "aggregations": 2,
+      "tri_objective": 0.43329570599456335,
+      "pareto_optimal": true
+    }
+  },
+  "A7_fixed_buffer_small": {
+    "config": {
+      "max_staleness": 15,
+      "min_buffer_size": 2,
+      "max_buffer_size": 2,
+      "adaptive_weighting": true,
+      "momentum": 0.85,
+      "compression": "topk",
+      "k": 100,
+      "auto_scale_params": false,
+      "staleness_mode": "quadratic",
+      "staleness_floor": 0.2,
+      "staleness_quantile": 0.9,
+      "enable_staleness_adaptation": true,
+      "enable_health_relaxation": true,
+      "server_lr": 0.2,
+      "gradient_clip": 2.0,
+      "participation_rate": 0.8164965809277261
+    },
+    "metrics": {
+      "accuracy": 0.2537313432835821,
+      "loss": 1.423014162191704,
+      "intent_f1": 0.10119047619047619,
+      "bleu": 0.0335195530726257,
+      "communication_mb": 0.184844970703125,
+      "elapsed_sec": 0.6238243579864502,
+      "aggregations": 4,
+      "tri_objective": 0.4268577844705155,
+      "pareto_optimal": false
+    }
+  }
+}
