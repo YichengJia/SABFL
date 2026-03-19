@@ -320,22 +320,22 @@ def _profile_bank(num_clients: int, model_cfg: Dict[str, Any], topk_fracs: List[
     return {
         "fedavg": [
             {"strict_reproduction": True, "participation_rate": 0.5, "use_timeout": False, "max_round_time": 10.0},
-            {"strict_reproduction": True, "participation_rate": 0.6, "use_timeout": False, "max_round_time": 10.0},
+            {"strict_reproduction": True, "participation_rate": 0.6, "use_timeout": False, "max_round_time": 10.0, "compression": "qsgd", "num_bits": 8},
             {"strict_reproduction": True, "participation_rate": 0.7, "use_timeout": False, "max_round_time": 10.0, "compression": "topk", "k": k_common},
         ],
         "fedasync": [
             {"max_staleness": 8, "learning_rate": 0.6, "staleness_mode": "linear", "staleness_floor": 0.1, "server_tick_sec": 0.02},
-            {"max_staleness": 10, "learning_rate": 0.8, "staleness_mode": "linear", "staleness_floor": 0.1, "server_tick_sec": 0.02},
+            {"max_staleness": 10, "learning_rate": 0.8, "staleness_mode": "linear", "staleness_floor": 0.1, "server_tick_sec": 0.02, "compression": "qsgd", "num_bits": 8},
             {"max_staleness": 15, "learning_rate": 1.0, "staleness_mode": "linear", "staleness_floor": 0.1, "server_tick_sec": 0.02, "compression": "topk", "k": k_common},
         ],
         "fedbuff": [
             {"buffer_size": 3, "max_staleness": 10, "server_lr": 0.2, "gradient_clip": 5.0},
-            {"buffer_size": 5, "max_staleness": 15, "server_lr": 0.2, "gradient_clip": 5.0},
+            {"buffer_size": 5, "max_staleness": 15, "server_lr": 0.2, "gradient_clip": 5.0, "compression": "qsgd", "num_bits": 8},
             {"buffer_size": 8, "max_staleness": 20, "server_lr": 0.2, "gradient_clip": 5.0, "compression": "topk", "k": k_common},
         ],
         "scaffold": [
             {"strict_reproduction": True, "participation_rate": 0.5, "use_timeout": False, "learning_rate": 0.6, "max_round_time": 10.0},
-            {"strict_reproduction": True, "participation_rate": 0.6, "use_timeout": False, "learning_rate": 0.8, "max_round_time": 10.0},
+            {"strict_reproduction": True, "participation_rate": 0.6, "use_timeout": False, "learning_rate": 0.8, "max_round_time": 10.0, "compression": "qsgd", "num_bits": 8},
             {"strict_reproduction": True, "participation_rate": 0.7, "use_timeout": False, "learning_rate": 1.0, "max_round_time": 10.0, "compression": "topk", "k": k_common},
         ],
         "improved_async": [
