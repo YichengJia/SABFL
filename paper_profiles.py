@@ -108,7 +108,7 @@ def get_reproduction_notes() -> List[Dict[str, str]]:
         {
             "protocol": "scaffold",
             "intent": "Control-variate based sync rounds with strict gating.",
-            "known_deviation": "Control variate update is simplified for unified framework compatibility.",
+            "known_deviation": "Canonical update rule is implemented; communication accounting now includes scaffold control-payload overhead estimates.",
         },
         {
             "protocol": "improved_async",
