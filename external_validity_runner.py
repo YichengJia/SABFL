@@ -608,6 +608,8 @@ def run_once(
         "buffer_occupancy_p90": float(m.get("buffer_occupancy_p90", 0.0)),
         "buffer_wait_sec_mean": float(m.get("buffer_wait_sec_mean", 0.0)),
         "buffer_wait_sec_p90": float(m.get("buffer_wait_sec_p90", 0.0)),
+        "control_payload_uplink_mb": float(m.get("control_payload_uplink_mb", 0.0)),
+        "control_payload_downlink_mb": float(m.get("control_payload_downlink_mb", 0.0)),
         **conv,
         "trace": trace,
     }
