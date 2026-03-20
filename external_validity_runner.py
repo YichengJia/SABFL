@@ -490,7 +490,8 @@ def run_once(
         else:
             active = active_rng.choice(len(client_datasets), n_active, replace=False)
         consumed_schedule.append([int(x) for x in active.tolist()])
-        for cid in active:
+        outer_step = max(0, len(consumed_schedule) - 1)
+        for inner_pos, cid in enumerate(active):
             if fairness_mode == "equal_updates" and sent_updates >= target_updates:
                 break
             if fairness_mode == "equal_accepted_updates" and accepted_updates >= target_updates:
@@ -513,7 +514,7 @@ def run_once(
             if active_selection_seed is not None:
                 seed_material = (
                     f"{int(active_selection_seed)}|{str(fairness_mode)}|{int(cid)}|"
-                    f"{int(sent_updates)}|{int(pulled_version)}"
+                    f"{int(outer_step)}|{int(inner_pos)}"
                 )
                 local_seed = int(hashlib.sha256(seed_material.encode("utf-8")).hexdigest()[:8], 16)
                 torch.manual_seed(local_seed)
@@ -533,6 +534,8 @@ def run_once(
             for name, pnew in updated_state.items():
                 if name in gstate and "num_batches_tracked" not in name:
                     delta[name] = pnew.float() - gstate[name].float()
+            # Sender-side transport simulation: compress before building update object.
+            delta_transport = protocol.compress_for_transport(delta, client_id=client_id)
             scaffold_payload = None
             if protocol_name == "scaffold" and scaffold_c_global is not None and scaffold_c_client is not None:
                 scaffold_payload = build_scaffold_control_payload(
@@ -544,7 +547,7 @@ def run_once(
                 )
             update = ClientUpdate(
                 client_id=client_id,
-                update_data=delta,
+                update_data=delta_transport,
                 model_version=int(pulled_version),
                 local_loss=float(local_loss),
                 data_size=int(data_size),

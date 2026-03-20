@@ -209,10 +209,14 @@ def quick_test_improved_config():
                         param_update = param.clone().float()
                         global_param = global_state[param_name].clone().float()
                         update_dict[param_name] = param_update - global_param
+                update_transport = protocol.compress_for_transport(
+                    update_dict,
+                    client_id=f"client_{client_id}",
+                )
 
                 update = ClientUpdate(
                     client_id=f"client_{client_id}",
-                    update_data=update_dict,
+                    update_data=update_transport,
                     model_version=int(pulled_version),
                     local_loss=loss,
                     data_size=data_size,

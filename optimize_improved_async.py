@@ -67,6 +67,10 @@ def test_configuration(config, client_datasets, test_dataset, model_config, num_
 
             # Submit update
             use_scaffold = hasattr(protocol, "get_scaffold_controls")
+            update_transport = protocol.compress_for_transport(
+                update_dict,
+                client_id=f"client_{client_id}",
+            )
             scaffold_payload = None
             if use_scaffold and scaffold_c_global is not None and scaffold_c_client is not None:
                 scaffold_payload = build_scaffold_control_payload(
@@ -78,7 +82,7 @@ def test_configuration(config, client_datasets, test_dataset, model_config, num_
                 )
             update = ClientUpdate(
                 client_id=f"client_{client_id}",
-                update_data=update_dict,
+                update_data=update_transport,
                 model_version=int(pulled_version),
                 local_loss=float(loss),
                 data_size=int(data_size),
@@ -490,6 +494,10 @@ def compare_with_baseline():
                         update_dict[param_name] = param.float() - global_state[param_name].float()
 
                 use_scaffold = hasattr(protocol, 'get_scaffold_controls')
+                update_transport = protocol.compress_for_transport(
+                    update_dict,
+                    client_id=f"client_{client_id}",
+                )
                 scaffold_payload = None
                 if use_scaffold and scaffold_c_global is not None and scaffold_c_client is not None:
                     scaffold_payload = build_scaffold_control_payload(
@@ -501,7 +509,7 @@ def compare_with_baseline():
                     )
                 update = ClientUpdate(
                     client_id=f"client_{client_id}",
-                    update_data=update_dict,
+                    update_data=update_transport,
                     model_version=int(pulled_version),
                     local_loss=float(loss),
                     data_size=int(data_size),

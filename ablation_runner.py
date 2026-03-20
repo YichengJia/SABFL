@@ -71,6 +71,10 @@ def run_single_experiment(
             for pname, pnew in updated_state.items():
                 if pname in global_state and "num_batches_tracked" not in pname:
                     update_dict[pname] = pnew.float() - global_state[pname].float()
+            update_transport = protocol.compress_for_transport(
+                update_dict,
+                client_id=f"client_{cid}",
+            )
 
             use_scaffold = hasattr(protocol, "get_scaffold_controls")
             scaffold_payload = None
@@ -84,7 +88,7 @@ def run_single_experiment(
                 )
             update = ClientUpdate(
                 client_id=f"client_{cid}",
-                update_data=update_dict,
+                update_data=update_transport,
                 model_version=int(pulled_version),
                 local_loss=float(local_loss),
                 data_size=int(data_size),

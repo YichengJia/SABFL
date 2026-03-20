@@ -9,7 +9,7 @@ import unittest
 import torch
 from torch.utils.data import TensorDataset
 
-from federated_protocol_framework import create_protocol
+from federated_protocol_framework import create_protocol, ClientUpdate
 from external_validity_runner import run_once
 
 
@@ -61,6 +61,26 @@ class MethodologyGuardsTest(unittest.TestCase):
         )
         self.assertTrue(bool(row.get("schedule_hash_actual", "")))
         self.assertGreater(float(row.get("model_downlink_mb", 0.0)), 0.0)
+
+    def test_sender_side_transport_compression_path(self):
+        protocol = create_protocol("fedavg", num_clients=2, strict_reproduction=True, compression="topk", k=4)
+        delta = {"w": torch.arange(16, dtype=torch.float32)}
+        tx = protocol.compress_for_transport(delta, client_id="client_0")
+        self.assertTrue(protocol.is_transport_compressed(tx))
+        pulled, _ = protocol.get_global_model_with_version()
+        if pulled is None:
+            protocol.set_global_model({"w": torch.zeros(16, dtype=torch.float32)})
+        update = ClientUpdate(
+            client_id="client_0",
+            update_data=tx,
+            model_version=0,
+            local_loss=0.0,
+            data_size=16,
+            timestamp=0.0,
+        )
+        accepted, _ = protocol.receive_update(update)
+        self.assertTrue(bool(accepted))
+        protocol.shutdown()
 
 
 if __name__ == "__main__":

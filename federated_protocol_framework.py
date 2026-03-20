@@ -317,6 +317,37 @@ class FederatedProtocol(ABC):
                 total += int(v.nbytes)
         return int(total)
 
+    def is_transport_compressed(self, update_data: Dict[str, Any]) -> bool:
+        """
+        Heuristic check whether update payload is already in transport form.
+        """
+        if not update_data:
+            return False
+        first_val = next(iter(update_data.values()))
+        return isinstance(first_val, tuple) and len(first_val) == 2
+
+    def compress_for_transport(self, update_delta: Dict[str, Any], client_id: str = "") -> Dict[str, Any]:
+        """
+        Simulate sender-side compression before transport.
+        If payload is already compressed, keep it unchanged.
+        """
+        if getattr(self, "compressor", None) is None:
+            return update_delta
+        if self.is_transport_compressed(update_delta):
+            return update_delta
+
+        compressed: Dict[str, Any] = {}
+        for name, delta in update_delta.items():
+            if not isinstance(delta, torch.Tensor):
+                compressed[name] = delta
+                continue
+            if isinstance(self.compressor, TopKCompressor):
+                comp, shape = self.compressor.compress(delta, key=f"{str(client_id)}:{name}")
+            else:
+                comp, shape = self.compressor.compress(delta)
+            compressed[name] = (comp, shape)
+        return compressed
+
     def shutdown(self):
         """Shutdown protocol"""
         self.running = False
@@ -365,13 +396,8 @@ class SyncFedAvg(FederatedProtocol):
 
     def receive_update(self, update: ClientUpdate) -> Tuple[bool, int]:
         with self._lock:
-            # Optional compression before storing
-            if hasattr(self, "compressor") and self.compressor is not None:
-                compressed_update = {}
-                for name, delta in update.update_data.items():
-                    comp, shape = self.compressor.compress(delta)
-                    compressed_update[name] = (comp, shape)
-                update.update_data = compressed_update
+            # Backward-compatible fallback: compress only if sender did not.
+            update.update_data = self.compress_for_transport(update.update_data, update.client_id)
 
             # Check if update is for current round
             if update.model_version != self.current_round:
@@ -498,13 +524,8 @@ class AsyncFedAvg(FederatedProtocol):
 
     def receive_update(self, update: ClientUpdate) -> Tuple[bool, int]:
         with self._lock:
-            # Optional compression before storing
-            if hasattr(self, "compressor") and self.compressor is not None:
-                compressed_update = {}
-                for name, delta in update.update_data.items():
-                    comp, shape = self.compressor.compress(delta)
-                    compressed_update[name] = (comp, shape)
-                update.update_data = compressed_update
+            # Backward-compatible fallback: compress only if sender did not.
+            update.update_data = self.compress_for_transport(update.update_data, update.client_id)
 
             current_version = self.model_version
             staleness = current_version - update.model_version
@@ -616,13 +637,8 @@ class FedBuff(FederatedProtocol):
 
     def receive_update(self, update: ClientUpdate) -> Tuple[bool, int]:
         with self._lock:
-            # Optional compression before storing
-            if hasattr(self, "compressor") and self.compressor is not None:
-                compressed_update = {}
-                for name, delta in update.update_data.items():
-                    comp, shape = self.compressor.compress(delta)
-                    compressed_update[name] = (comp, shape)
-                update.update_data = compressed_update
+            # Backward-compatible fallback: compress only if sender did not.
+            update.update_data = self.compress_for_transport(update.update_data, update.client_id)
 
             current_version = self.model_version
             staleness = current_version - update.model_version
@@ -839,22 +855,14 @@ class ImprovedAsyncProtocol(FederatedProtocol):
     def receive_update(self, update: ClientUpdate) -> Tuple[bool, int]:
         """
         Receive a client update:
-          - Optionally compress deltas (server-side).
+          - Use sender-side transported payload (or fallback compression for legacy runners).
           - Count communication exactly once in compressed form.
           - Drop overly stale updates using an adaptive threshold.
           - Push accepted updates to the buffer without double counting.
         """
         with self._lock:
-            # Optional compression before storing
-            if getattr(self, "compressor", None) is not None:
-                compressed_update = {}
-                for name, delta in update.update_data.items():
-                    if isinstance(self.compressor, TopKCompressor):
-                        comp, shape = self.compressor.compress(delta, key=f"{update.client_id}:{name}")
-                    else:
-                        comp, shape = self.compressor.compress(delta)
-                    compressed_update[name] = (comp, shape)
-                update.update_data = compressed_update
+            # Backward-compatible fallback: compress only if sender did not.
+            update.update_data = self.compress_for_transport(update.update_data, update.client_id)
 
             current_version = self.model_version
             # Non-negative staleness guard
@@ -1194,13 +1202,8 @@ class Scaffold(FederatedProtocol):
                     )
                 return False, self.current_round
 
-            # Optional compression before storing
-            if hasattr(self, "compressor") and self.compressor is not None:
-                compressed_update = {}
-                for name, delta in update.update_data.items():
-                    comp, shape = self.compressor.compress(delta)
-                    compressed_update[name] = (comp, shape)
-                update.update_data = compressed_update
+            # Backward-compatible fallback: compress only if sender did not.
+            update.update_data = self.compress_for_transport(update.update_data, update.client_id)
 
             # Buffer the update
             self.round_buffer.append(update)

@@ -119,6 +119,10 @@ def main():
                     for name, p_new in updated_state.items():
                         if "num_batches_tracked" not in name:
                             update_dict[name] = p_new.float()
+                update_transport = protocol.compress_for_transport(
+                    update_dict,
+                    client_id=str(cid),
+                )
                 scaffold_payload = None
                 if proto == "scaffold" and scaffold_c_global is not None and scaffold_c_client is not None:
                     scaffold_payload = build_scaffold_control_payload(
@@ -131,7 +135,7 @@ def main():
 
                 update = ClientUpdate(
                     client_id=str(cid),
-                    update_data=update_dict,
+                    update_data=update_transport,
                     model_version=int(pulled_version),
                     local_loss=float(local_loss),
                     data_size=int(n_samples),
@@ -198,6 +202,10 @@ def main():
                         for name, p_new in updated_state.items():
                             if "num_batches_tracked" not in name:
                                 update_dict[name] = p_new.float()
+                    update_transport = protocol.compress_for_transport(
+                        update_dict,
+                        client_id=str(cid),
+                    )
                     scaffold_payload = None
                     if proto == "scaffold" and scaffold_c_global is not None and scaffold_c_client is not None:
                         scaffold_payload = build_scaffold_control_payload(
@@ -210,7 +218,7 @@ def main():
 
                     update = ClientUpdate(
                         client_id=str(cid),
-                        update_data=update_dict,
+                        update_data=update_transport,
                         model_version=int(pulled_version),
                         local_loss=float(local_loss),
                         data_size=int(n_samples),
