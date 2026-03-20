@@ -109,6 +109,7 @@ class ProtocolMetrics:
             'buffer_wait_sec_p90': 0.0,
             'control_payload_uplink_mb': 0.0,
             'control_payload_downlink_mb': 0.0,
+            'model_downlink_mb': 0.0,
 
             # Time series data
             'accuracy_history': [],
@@ -320,6 +321,15 @@ class FederatedProtocol(ABC):
         """Shutdown protocol"""
         self.running = False
         logger.info(f"{self.__class__.__name__} shutdown")
+
+    def account_model_downlink(self, model_state: Dict[str, torch.Tensor]):
+        """
+        Account server->client model payload bytes for a client pull.
+        """
+        if model_state is None:
+            return
+        payload_bytes = self.calculate_tensor_dict_size(model_state)
+        self.metrics.add_overhead_communication(payload_bytes, bucket="model_downlink_mb")
 
 
 class SyncFedAvg(FederatedProtocol):

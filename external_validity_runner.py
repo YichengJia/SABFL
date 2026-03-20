@@ -445,6 +445,7 @@ def run_once(
     device: str = "auto",
     active_selection_seed: Optional[int] = None,
     schedule_hash: str = "",
+    precomputed_active_schedule: Optional[List[List[int]]] = None,
 ) -> Dict[str, Any]:
     torch_device = _resolve_device(device)
     cfg = dict(protocol_cfg)
@@ -462,6 +463,8 @@ def run_once(
     start = time.time()
     trace: List[Dict[str, float]] = []
     active_rng = np.random.default_rng(active_selection_seed) if active_selection_seed is not None else None
+    schedule_ptr = 0
+    consumed_schedule: List[List[int]] = []
 
     sent_updates = 0
     accepted_updates = 0
@@ -479,10 +482,14 @@ def run_once(
             raise ValueError(f"Unknown fairness mode: {fairness_mode}")
 
         n_active = max(1, int(len(client_datasets) * participation_rate))
-        if active_rng is None:
+        if precomputed_active_schedule is not None and schedule_ptr < len(precomputed_active_schedule):
+            active = np.array(precomputed_active_schedule[schedule_ptr], dtype=np.int64)
+            schedule_ptr += 1
+        elif active_rng is None:
             active = np.random.choice(len(client_datasets), n_active, replace=False)
         else:
             active = active_rng.choice(len(client_datasets), n_active, replace=False)
+        consumed_schedule.append([int(x) for x in active.tolist()])
         for cid in active:
             if fairness_mode == "equal_updates" and sent_updates >= target_updates:
                 break
@@ -491,6 +498,7 @@ def run_once(
             gstate, pulled_version = protocol.get_global_model_with_version()
             if gstate is None:
                 continue
+            protocol.account_model_downlink(gstate)
             client_id = f"client_{cid}"
             local_model = SimpleNN(**model_cfg)
             local_model.load_state_dict(gstate, strict=False)
@@ -500,6 +508,16 @@ def run_once(
             if protocol_name == "scaffold":
                 # Canonical SCAFFOLD: client-side gradient correction uses (c, c_i).
                 scaffold_c_global, scaffold_c_client = protocol.get_scaffold_controls(client_id)
+
+            # Deterministic local-training seed for stronger paired randomness across protocols.
+            if active_selection_seed is not None:
+                seed_material = (
+                    f"{int(active_selection_seed)}|{str(fairness_mode)}|{int(cid)}|"
+                    f"{int(sent_updates)}|{int(pulled_version)}"
+                )
+                local_seed = int(hashlib.sha256(seed_material.encode("utf-8")).hexdigest()[:8], 16)
+                torch.manual_seed(local_seed)
+                np.random.seed(local_seed)
 
             updated_state, local_loss, data_size, local_steps = _train_client(
                 local_model,
@@ -580,10 +598,14 @@ def run_once(
         })
     conv = _compute_trace_metrics(trace, thresholds=acc_thresholds)
     protocol.shutdown()
+    actual_schedule_hash = hashlib.sha256(
+        json.dumps(consumed_schedule, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
     return {
         "protocol_key": protocol_key,
         "fairness_mode": fairness_mode,
         "schedule_hash": str(schedule_hash),
+        "schedule_hash_actual": str(actual_schedule_hash),
         "active_selection_seed": int(active_selection_seed) if active_selection_seed is not None else None,
         "accuracy": ev["accuracy"],
         "loss": ev["loss"],
@@ -620,6 +642,7 @@ def run_once(
         "buffer_wait_sec_p90": float(m.get("buffer_wait_sec_p90", 0.0)),
         "control_payload_uplink_mb": float(m.get("control_payload_uplink_mb", 0.0)),
         "control_payload_downlink_mb": float(m.get("control_payload_downlink_mb", 0.0)),
+        "model_downlink_mb": float(m.get("model_downlink_mb", 0.0)),
         **conv,
         "trace": trace,
     }

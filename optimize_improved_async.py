@@ -42,6 +42,7 @@ def test_configuration(config, client_datasets, test_dataset, model_config, num_
             global_state, pulled_version = protocol.get_global_model_with_version()
             if global_state is None:
                 continue
+            protocol.account_model_downlink(global_state)
 
             # Local training
             local_model = SimpleNN(**model_config)
@@ -467,6 +468,7 @@ def compare_with_baseline():
                 global_state, pulled_version = protocol.get_global_model_with_version()
                 if global_state is None:
                     continue
+                protocol.account_model_downlink(global_state)
 
                 local_model = SimpleNN(**model_config)
                 local_model.load_state_dict(global_state)

@@ -25,6 +25,7 @@ from external_validity_runner import (
     ClientPhotometricDataset,
     run_once,
     _estimate_model_param_count,
+    _tensor_signature,
 )
 from unified_protocol_comparison import set_seed
 
@@ -63,6 +64,25 @@ def _save_csv(path: str, rows: List[Dict[str, Any]]):
         w = csv.DictWriter(f, fieldnames=keys)
         w.writeheader()
         w.writerows(rows)
+
+
+def _precompute_active_schedule(
+    active_selection_seed: int,
+    num_clients: int,
+    n_active: int,
+    max_outer_steps: int,
+) -> List[List[int]]:
+    rng = np.random.default_rng(int(active_selection_seed))
+    schedule: List[List[int]] = []
+    for _ in range(max(0, int(max_outer_steps))):
+        active = rng.choice(int(num_clients), int(n_active), replace=False)
+        schedule.append([int(x) for x in active.tolist()])
+    return schedule
+
+
+def _hash_schedule(schedule: List[List[int]]) -> str:
+    payload = json.dumps(schedule, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _mean_std_ci(values: List[float]) -> Tuple[float, float, float]:
@@ -469,11 +489,18 @@ def main():
     p.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "cpu"])
     p.add_argument("--backbone", type=str, default="resnet18", help="Model backbone (e.g. resnet18)")
     p.add_argument("--checkpoint_every_mode", action="store_true", help="Save intermediate outputs after each mode")
+    p.add_argument(
+        "--schedule_steps_factor",
+        type=float,
+        default=10.0,
+        help="Outer-loop precomputed schedule length factor for equal_accepted_updates.",
+    )
     args = p.parse_args()
     print(f"[device] requested={args.device}", flush=True)
     Path("results").mkdir(exist_ok=True)
+    metadata = _runtime_metadata(args)
     with open("results/robust_external_metadata.json", "w", encoding="utf-8") as f:
-        json.dump(_runtime_metadata(args), f, indent=2)
+        json.dump(metadata, f, indent=2)
 
     n_list = [int(x.strip()) for x in args.num_clients_list.split(",") if x.strip()]
     fairness_modes = [x.strip() for x in args.fairness_modes.split(",") if x.strip()]
@@ -491,6 +518,7 @@ def main():
     }
 
     raw_rows: List[Dict[str, Any]] = []
+    split_signatures: List[Dict[str, Any]] = []
 
     try:
         for n_clients in n_list:
@@ -501,6 +529,8 @@ def main():
                 seed = int(args.seed + seed_offset)
                 set_seed(seed)
                 x_train, y_train, x_test, y_test = _load_cifar10_subset(args.train_size, args.test_size)
+                train_sig = _tensor_signature(x_train, y_train)
+                test_sig = _tensor_signature(x_test, y_test)
                 client_datasets = _build_non_iid_clients(
                     x_train,
                     y_train,
@@ -529,6 +559,31 @@ def main():
                     )
                     schedule_hash = hashlib.sha256(schedule_base.encode("utf-8")).hexdigest()
                     active_selection_seed = int(schedule_hash[:8], 16)
+                    if mode == "equal_rounds":
+                        schedule_steps = int(args.rounds)
+                    elif mode == "equal_updates":
+                        schedule_steps = int(math.ceil(float(target_updates) / float(max(1, n_active)))) + 2
+                    else:
+                        base_steps = int(math.ceil(float(target_updates) / float(max(1, n_active)))) + 2
+                        schedule_steps = int(math.ceil(float(base_steps) * float(args.schedule_steps_factor)))
+                    precomputed_schedule = _precompute_active_schedule(
+                        active_selection_seed=active_selection_seed,
+                        num_clients=n_clients,
+                        n_active=n_active,
+                        max_outer_steps=schedule_steps,
+                    )
+                    precomputed_schedule_hash = _hash_schedule(precomputed_schedule)
+                    split_signatures.append({
+                        "num_clients": int(n_clients),
+                        "seed": int(seed),
+                        "fairness_mode": str(mode),
+                        "train_signature": str(train_sig),
+                        "test_signature": str(test_sig),
+                        "active_selection_seed": int(active_selection_seed),
+                        "schedule_hash_condition": str(schedule_hash),
+                        "schedule_hash_precomputed": str(precomputed_schedule_hash),
+                        "precomputed_outer_steps": int(schedule_steps),
+                    })
                     for compression_suite in compression_suites:
                         profile_bank = _profile_bank(
                             n_clients,
@@ -559,11 +614,15 @@ def main():
                                     device=args.device,
                                     active_selection_seed=active_selection_seed,
                                     schedule_hash=schedule_hash,
+                                    precomputed_active_schedule=precomputed_schedule,
                                 )
                                 row["num_clients"] = int(n_clients)
                                 row["seed"] = int(seed)
                                 row["protocol_family"] = proto
                                 row["compression_suite"] = str(compression_suite)
+                                row["train_signature"] = str(train_sig)
+                                row["test_signature"] = str(test_sig)
+                                row["schedule_hash_precomputed"] = str(precomputed_schedule_hash)
                                 row["profile_idx"] = int(idx)
                                 row["profile_budget_profiles"] = int(args.profile_trials_per_family)
                                 row.pop("trace", None)  # raw trace can be huge; keep per-run compact here
@@ -592,6 +651,16 @@ def main():
             fairness_modes=fairness_modes,
             compression_suites=compression_suites,
         )
+        with open("results/robust_external_split_signatures.json", "w", encoding="utf-8") as f:
+            json.dump(split_signatures, f, indent=2)
+        metadata["post_run_summary"] = {
+            "raw_rows": int(len(raw_rows)),
+            "split_signature_records": int(len(split_signatures)),
+            "compression_suites": [str(x) for x in compression_suites],
+            "fairness_modes": [str(x) for x in fairness_modes],
+        }
+        with open("results/robust_external_metadata.json", "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
 
     print("\nSaved:")
     print("- results/robust_external_raw.csv")
@@ -600,6 +669,7 @@ def main():
     print("- results/robust_external_summary.json")
     print("- results/robust_external_pairwise_tests.csv")
     print("- results/robust_external_pairwise_tests.json")
+    print("- results/robust_external_split_signatures.json")
 
 
 if __name__ == "__main__":

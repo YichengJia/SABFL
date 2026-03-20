@@ -93,6 +93,7 @@ def main():
                 local_model = SimpleNN(input_dim=INPUT_DIM, hidden_dim=64, output_dim=NUM_CLASSES)
                 state, pulled_version = protocol.get_global_model_with_version()
                 if state:
+                    protocol.account_model_downlink(state)
                     local_model.load_state_dict(state, strict=False)
 
                 scaffold_c_global = None
@@ -171,6 +172,7 @@ def main():
                     local_model = SimpleNN(input_dim=INPUT_DIM, hidden_dim=64, output_dim=NUM_CLASSES)
                     state, pulled_version = protocol.get_global_model_with_version()
                     if state:
+                        protocol.account_model_downlink(state)
                         local_model.load_state_dict(state, strict=False)
 
                     scaffold_c_global = None

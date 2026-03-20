@@ -594,6 +594,7 @@ def compare_protocols(protocols_config: Dict, experiment_config: Dict) -> Dict:
                 global_state, pulled_version = protocol.get_global_model_with_version()
                 if global_state is None:
                     continue
+                protocol.account_model_downlink(global_state)
                 local_model = SimpleNN(**model_config)
                 local_model.load_state_dict(global_state)
 
