@@ -89,6 +89,9 @@ def run_experiment_with_config(config, num_clients=10, samples_per_client=100, d
     while time.time() - start_time < duration:
         for client_id in range(num_clients):
             global_state, pulled_version = protocol.get_global_model_with_version()
+            if global_state is None:
+                continue
+            protocol.account_model_downlink(global_state)
             local_model = SimpleNN(**model_config)
             local_model.load_state_dict(global_state)
 
